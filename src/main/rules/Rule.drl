@@ -1,0 +1,150 @@
+package br.ufes.inf.lprm.jamco.situation;
+ 
+import br.ufes.inf.lprm.jamco.model.Bus;
+import br.ufes.inf.lprm.jamco.model.Road;
+
+import br.ufes.inf.lprm.scene.base.*;
+import br.ufes.inf.lprm.situation.events.ActivateSituationEvent;
+
+########################
+##      GLOBALS       ##
+########################
+global java.lang.Double DEFAULT_MIN_SPEED
+
+########################
+##    DECLARATIONS    ##
+########################
+
+declare Bus
+	@role(event)
+end
+
+declare FastBusEvent
+	@role(event)
+	@duration(300000)
+	@expires( 5m ) 
+	road : Road
+end
+
+########################
+##       FACTS        ##
+########################
+
+rule "Fact: Road"
+	salience 1
+	when
+		Bus($address : address)
+		not (exists Road(address == $address))
+	then
+		insert (new Road($address, DEFAULT_MIN_SPEED));
+end
+
+########################
+##      EVENTS        ##
+########################
+
+rule "Event: Flowing Road"
+	salience 1
+	when
+		$road : Road($address : address, $minSpeed : minSpeed)
+		exists (Bus(address == $address, speed >= $minSpeed))
+	then
+		insert (new FastBusEvent($road));
+end
+
+########################
+##  LOCAL SITUATIONS  ##
+########################
+
+rule "Situation: Flowing Road"
+	@role(situation)
+	@type(FlowingRoad)
+	when
+		$road : Road()
+		exists(FastBusEvent(road == $road) over window : time (5m))
+	then
+		SituationHelper.situationDetected(drools);
+end
+
+rule "Situation: Reduced Speed Bus"
+	@role(situation)
+	@type(ReducedSpeedBus)
+	when
+		$bus : Bus (speed < DEFAULT_MIN_SPEED)
+	then
+		SituationHelper.situationDetected(drools);
+end
+
+rule "Situation: Slow Bus"
+	@role(situation)
+	@type(SlowBus)
+	when
+		$reduced : ReducedSpeedBus($bus : bus, active)
+		not (exists ActivateSituationEvent(situation == $reduced) over window : time ( 1m ))
+	then
+		SituationHelper.situationDetected(drools);
+end
+
+rule "Situation: Stuck Bus"
+	@role(situation)
+	@type(StuckBus)
+	when
+		$bus : Bus ($address : address)
+		$road : Road(address == $address)
+		exists SlowBus(bus == $bus, active)
+		not (exists FlowingRoad(road == $road, active))
+	then
+		SituationHelper.situationDetected(drools);
+end
+
+########################
+##  PUBLIC SITUATIONS ##
+########################
+
+rule "Situation: Slightly Congested Road"
+	@role(situation)
+	@type(SlightlyCongestedRoad)
+	when
+		$road : Road($address : address, $minSpeed : minSpeed)
+		accumulate(
+			$stuck : StuckBus(bus.address == $address, $speed : bus.speed, active);
+			$avg : average($speed),
+			$count : count ($stuck);
+			$count > 2,
+			$avg < $minSpeed && > (2 * $minSpeed) / 3
+		)
+	then
+		SituationHelper.situationDetected(drools);
+end
+
+rule "Situation: Moderately Congested Road"
+	@role(situation)
+	@type(ModeratelyCongestedRoad)
+	when
+		$road : Road($address : address, $minSpeed : minSpeed)
+		accumulate(
+			$stuck : StuckBus(bus.address == $address, $speed : bus.speed, active);
+			$avg : average($speed),
+			$count : count ($stuck);
+			$count > 2,
+			$avg < (2 * $minSpeed) / 3  && > $minSpeed / 3
+		)
+	then
+		SituationHelper.situationDetected(drools);
+end
+
+rule "Situation: Heavily Congested Road"
+	@role(situation)
+	@type(HeavilyCongestedRoad)
+	when
+		$road : Road($address : address, $minSpeed : minSpeed)
+		accumulate(
+			$stuck : StuckBus(bus.address == $address, $speed : bus.speed, active);
+			$avg : average($speed),
+			$count : count ($stuck);
+			$count > 2,
+			$avg < $minSpeed / 3
+		)
+	then
+		SituationHelper.situationDetected(drools);
+end
